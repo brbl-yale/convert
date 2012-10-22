@@ -14,10 +14,30 @@ from application_lock import ApplicationLock
 
 
 """
+Verbosity
+"""
+VERBOSE=True
+
+
+"""
+Conversion options
+"""
+TIF_TO_JP2=False
+JP2_TO_JPEG=True
+
+
+"""
+Conversion tools
+"""
+JP2_TOOL='kdu_compress'
+JPEG_TOOL='convert'
+
+
+"""
 Kakadu kdu_compress runtime options
 """
 KDU_OPTIONS = \
-    '-quiet -rate 2 Clayers=2 Clevels=8 \"Cprecincts={256,256},{256,256},{128,128}\" \"Corder=RPCL\" \"ORGgen_plt=yes\" \"ORGtparts=R\" \"Cblk={64,64}\" Cuse_sop=yes Stiles=\"{256,256}\" Creversible=yes'
+     '-quiet -rate 1.5 Creversible=yes Clayers=1 Clevels=7 \"Cprecincts={256,256},{256,256},{128,128}\" \"Corder=RPCL\" \"ORGgen_plt=yes\" \"ORGtparts=R\" \"Cblk={64,64}\" Cuse_sop=yes'
 
 
 """
@@ -30,7 +50,7 @@ JPEG_DEST_FILES    = [['half.jpg', '1500x2100'],['quarter.jpg',
 """
 Email alert using GMail
 """
-EMAIL           = 'email@email.edu
+EMAIL           = 'email@email.edu'
 SUBJECT         = 'Image Convert Report ' + str(date.today())
 FROM_EMAIL      = 'email@gmail.com'
 USERNAME        = 'email'
@@ -60,7 +80,7 @@ emaillog = logBuffer()
 """
 def parseOptions():
     usage = 'usage: %prog [options]'
-    description = 'Process a directory containing image files and convert from TIFF to JPEG2000, and JPEG2000 to a variety of JPEG derivatives.  Prerequisites include Kakadu kdu_compress and ImageMagick compiled with JasPer (for JPEG2000 support).  The application supports multi-threading for multi proc/core systems.'
+    description = 'Process a directory containing image files and convert from TIFF to JPEG2000, and JPEG2000 to a variety of JPEG derivatives.  Prerequisites include Kakadu kdu_compress and ImageMagick compiled with JasPer (for JPEG2000 support).  The application supports multi-threading for multi proc/core systems.  Email, command line options, verbosity, and other configuration options can be modified directly in convert.py'
     parser = optparse.OptionParser(usage=usage, description=description)
     parser.add_option(  
         '-s',
@@ -79,28 +99,12 @@ def parseOptions():
 	help='Destination directory of processed images: Absolute or relative path.'
 	)
     parser.add_option(
-	'-c',
-	'--jp2conversion',
-	action='store',
-	dest='jp2conversion',
-	default='kdu_compress',
-	help='Set tiff to jp2 program.  default kdu_compress'
-	)
-    parser.add_option(
-        '-j',
-        '--jpegconversion',
-        action='store',
-        dest='jpegconversion',
-        default='convert',
-        help='Set jp2 to jpeg program.  default ImageMagick convert with Jasper JP2 support'
-        )
-    parser.add_option(
         '-t',
         '--threads',
         action='store',
         dest='threads',
         default=12,
-        help='Set number of threads to execute at once.   default  = 12'
+        help='Set number of threads to execute at once.   default = 12'
         )
     parser.add_option(
         '-b',
@@ -167,6 +171,7 @@ def checkProgram(_name):
   @param	_destination	Destination directory (does not need to exist)
   @param	_broken		Directory to store broken images that are left unprocessed
   @param	_options	Options to pass to _app
+  @param	_verbose	Verbosity
 """
 def tif_to_jp2(
     _threads,
@@ -174,9 +179,9 @@ def tif_to_jp2(
     _source,
     _destination,
     _broken,
-    _options
+    _options,
+    _verbose
     ):
-    print 'Begin TIFF to JP2 conversion'
  
     testApp(_app)
 
@@ -196,8 +201,10 @@ def tif_to_jp2(
                     command = _app + ' -i ' + tiff + ' -o ' + jp2 + ' ' \
                         + _options
                     command_post = 'shutil.move(\'' + tiff + '\',\'' + tiffcopy + '\')'
+		    if _verbose == True:
+			print 'Creating ' + jp2
 	            t.add_task(executeConversion,command,command_post,tiff,_destination,_broken,file,jp2)
-            t.await_completion()
+                    t.await_completion()
 
 
 """
@@ -209,6 +216,7 @@ def tif_to_jp2(
   @param        _destination    Destination directory (does not need to exist)
   @param        _broken         Directory to store broken images that are left unprocessed
   @param	_jpegs		Array of names,sizes of various required derivatives
+  @param	_verbose	Verbosity
 """
 def jp2_to_jpeg(
     _threads,
@@ -216,10 +224,9 @@ def jp2_to_jpeg(
     _source,
     _destination,
     _broken,
-    _jpegs
+    _jpegs,
+    _verbose
     ):
-    print 'Begin JP2 to Jpeg conversion'
-
     testApp(_app)
 
     t = ThreadPool(_threads)
@@ -227,18 +234,19 @@ def jp2_to_jpeg(
     for (root, dirs, files) in os.walk(_destination):
         subpath = root.replace(_destination, '').lstrip('/')
         if _broken not in subpath:
-            for file in files:
-                if file.endswith('.jp2'):
-	            jp2 = os.path.join(root, file)
-                    for (output_file, size) in _jpegs:
+	    for (output_file, size) in _jpegs:
+                for file in files:
+                    if file.endswith('.jp2'):
+                        jp2 = os.path.join(root, file)
                         newfile = os.path.join(root,
-                                os.path.splitext(file)[0]) + '_' \
-                            + output_file
+                                  os.path.splitext(file)[0]) + '_' \
+                                  + output_file
                         command = _app + ' -size ' + size + " " + jp2 \
-                            + ' -resize ' + size + ' ' + newfile
-	                t.add_task(executeConversion,command,None,jp2,_source,_broken,file,newfile)
-            t.await_completion()
-
+                                  + ' -resize ' + size + ' ' + newfile
+                        if _verbose == True:
+                            print 'Creating ' + newfile
+			t.add_task(executeConversion,command,None,jp2,_source,_broken,file,newfile)
+	        t.await_completion()
 
 """
   Tests application exists and exits if not found
@@ -285,16 +293,14 @@ def executeConversion(
         print >>emaillog, 'Output: '
         print >>emaillog, output
         print >>emaillog, 'Moved to following directory for inspection: \n' + os.path.join(_destination,_broken,_file)
-        shutil.move(_srcfile, os.path.join(_destination,_broken,_file))
+        if (os.path.exists(_srcfile)):
+            shutil.move(_srcfile, os.path.join(_destination,_broken,_file))
         print >>emaillog, 'Removing file created by this process: \n' + _create
-        os.remove(_create)
+        if (os.path.exists(_create)):
+            os.remove(_create)
     else:
         if _command_post:
 	    exec _command_post
-            #if output_post:
-            #    print >>emaillog, 'Error encountered running the following command: '
-            #    print >>emaillog, _command_post
-	    #    print >>emaillog, output_post
         
 
 def main():
@@ -304,39 +310,39 @@ def main():
     (options, args) = parseOptions()
 
   # Test source exists
-  
+ 
     if os.path.isdir(options.source):
  
       # Create destination if doesn't exist
-  
-        if not os.path.isdir(options.destination):
-            print options.destination + ' does not exist.  Creating...'
-            makeDir(options.destination)
+  	if TIF_TO_JP2 == True:
+            if not os.path.isdir(options.destination):
+                print options.destination + ' does not exist.  Creating...'
+                makeDir(options.destination)
 
       # Create broken directory if doesn't exist
-
         if not os.path.isdir(options.broken):
             print options.broken + ' does not exist.  Creating...'
             makeDir(os.path.join(options.destination,options.broken))
 
       # Process images 
-  
-        tif_to_jp2(int(options.threads),options.jp2conversion,
-                   options.source,options.destination,options.broken,
-                   KDU_OPTIONS)
-        jp2_to_jpeg(int(options.threads),options.jpegconversion,
-                   options.source,options.destination,options.broken,
-                   JPEG_DEST_FILES)
+	if TIF_TO_JP2 == True:
+	    if VERBOSE == True:
+		print 'Ready to begin TIFF to JP2 transformation.'
+            tif_to_jp2(int(options.threads),JP2_TOOL,
+                       options.source,options.destination,options.broken,
+                       KDU_OPTIONS,VERBOSE)
+        if JP2_TO_JPEG == True:
+	    if VERBOSE == True:
+		print 'Ready to begin JP2 to JPEG transformation.'
+	    jp2_to_jpeg(int(options.threads),JPEG_TOOL,
+                       options.source,options.destination,options.broken,
+                       JPEG_DEST_FILES,VERBOSE)
  
 
       # Test if errors exist, email if true
 
         if emaillog.content:
             sendEmail(''.join(emaillog.content))
-
-      # Remove the source directory
-
-        shutil.rmtree(options.source)
 
 
 if __name__ == '__main__':
