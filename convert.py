@@ -7,6 +7,7 @@ import sys
 import optparse
 import string
 import smtplib
+import datetime
 from datetime import date
 import subprocess
 from thread_pool import ThreadPool
@@ -20,9 +21,21 @@ VERBOSE=True
 
 
 """
+Debug
+"""
+DEBUG=False # = Remove empty folders after processing
+
+
+"""
+Log File
+"""
+LOGFILE='/tmp/convert_' + datetime.datetime.now().strftime("%Y-%b-%d_%H-%M-%S") + '.log'
+
+
+"""
 Conversion options
 """
-TIF_TO_JP2=False
+TIF_TO_JP2=True
 JP2_TO_JPEG=True
 
 
@@ -135,6 +148,15 @@ def sendEmail(_message):
 
 
 """
+  Log output to local filesystem
+"""
+def logOutput(_message):
+    f = open(LOGFILE, 'w')
+    f.write(_message)
+    f.close()
+
+
+"""
   Make directory if it doesn't exist
 
   @param	_dir	Directory to be tested and created
@@ -192,6 +214,8 @@ def tif_to_jp2(
         if _broken not in subpath:  
             jp2Path = os.path.join(_destination,subpath)
             makeDir(jp2Path)
+            if any(".tif" in s for s in files):
+                print >>emaillog, 'Converting contents of ' + subpath + ' from TIF to JP2'
             for file in files:
                 if file.endswith('.tif'):
                     tiff = os.path.join(root, file)
@@ -204,7 +228,7 @@ def tif_to_jp2(
 		    if _verbose == True:
 			print 'Creating ' + jp2
 	            t.add_task(executeConversion,command,command_post,tiff,_destination,_broken,file,jp2)
-                    t.await_completion()
+        t.await_completion()
 
 
 """
@@ -234,6 +258,8 @@ def jp2_to_jpeg(
     for (root, dirs, files) in os.walk(_destination):
         subpath = root.replace(_destination, '').lstrip('/')
         if _broken not in subpath:
+            if any(".jp2" in s for s in files):
+                print >>emaillog, 'Converting contents of ' + subpath + ' from JP2 to JPEG'
 	    for (output_file, size) in _jpegs:
                 for file in files:
                     if file.endswith('.jp2'):
@@ -301,6 +327,24 @@ def executeConversion(
     else:
         if _command_post:
 	    exec _command_post
+
+def removeEmptyFolders(path):
+  if not os.path.isdir(path):
+    return
+ 
+  # remove empty subfolders
+  files = os.listdir(path)
+  if len(files):
+    for f in files:
+      fullpath = os.path.join(path, f)
+      if os.path.isdir(fullpath):
+        removeEmptyFolders(fullpath)
+ 
+  # if folder empty, delete it
+  files = os.listdir(path)
+  if len(files) == 0:
+    print "Removing empty folder:", path
+    os.rmdir(path)
         
 
 def main():
@@ -343,7 +387,13 @@ def main():
 
         if emaillog.content:
             sendEmail(''.join(emaillog.content))
+	    logOutput(''.join(emaillog.content))
 
+      # Remove any empty directories in source or destination
+	if DEBUG == False:
+            removeEmptyFolders(options.source)
+            removeEmptyFolders(options.destination)
+	
 
 if __name__ == '__main__':
     applock = ApplicationLock ('/tmp/convert.lock')
